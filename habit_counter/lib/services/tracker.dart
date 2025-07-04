@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:habit_counter/models/habit.dart';
 
 class HabitTracker {
-  List<Habit> habits = [];
-  int totalDone = 0;
-  int habitCounter = 0;
+  final List<Habit> habits = [];
+  final String storageFile = 'habits.json'; // relative to root dir
+
+  // int totalDone = 0;
+  // int habitCounter = 0;
+
   // ignore: non_constant_identifier_names
   Map<Difficulty, int> XPTable = {
     Difficulty.easy: 5,
@@ -21,9 +27,9 @@ class HabitTracker {
     }
   }
 
-  List<Habit> getHabitsList() {
-    return habits;
-  }
+  // List<Habit> getHabitsList() {
+  //   return habits;
+  // }
 
   int get totalXP => habits
       .where((h) => h.done)
@@ -32,4 +38,21 @@ class HabitTracker {
   int get totalCompleted => habits.where((h) => h.done).length;
 
   List<Habit> get allHabits => List.unmodifiable(habits);
+
+  // --- File I/O ---
+  Future<void> saveToFile() async {
+    final file = File(storageFile);
+    final content = jsonEncode(habits.map((h) => h.toJson()).toList());
+    await file.writeAsString(content);
+  }
+
+  Future<void> loadFromFile() async {
+    final file = File(storageFile);
+    if (await file.exists()) {
+      final content = await file.readAsString();
+      final List<dynamic> data = jsonDecode(content);
+      habits.clear();
+      habits.addAll(data.map((json) => Habit.fromJson(json)).toList());
+    }
+  }
 }
