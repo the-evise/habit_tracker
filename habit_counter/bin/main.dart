@@ -4,61 +4,110 @@ import 'package:habit_counter/services/tracker.dart';
 
 void main() async {
   final tracker = HabitTracker();
-
-  // Load existing habits if available
   await tracker.loadFromFile();
 
   stdout.writeln("--- Welcome to Habit Tracker ---");
 
-  if (tracker.allHabits.isNotEmpty) {
-    stdout.writeln("You have existing habits:");
-    for (int i = 0; i < tracker.allHabits.length; i++) {
-      final h = tracker.allHabits[i];
-      final status = h.done ? "✅" : "❌";
-      stdout.writeln("[$i] ${h.name} (${h.difficulty.name}) - $status");
+  outer:
+  while (true) {
+    stdout.writeln('\n== YOUR HABITS ==');
+    if (tracker.allHabits.isEmpty) {
+      stdout.writeln("⚠️ No habits yet.");
+    } else {
+      for (int i = 0; i < tracker.allHabits.length; i++) {
+        final h = tracker.allHabits[i];
+        stdout.writeln(
+          '$i. ${h.name} (${h.difficulty.name}) - '
+          '🔥 Streak: ${h.streak} day(s) - '
+          '${h.isDoneToday ? '✅ Done Today' : '❌ Not Done Yet'}',
+        );
+      }
     }
 
-    stdout.writeln("\nMark habits done today (comma-seperated indices):");
-    final input = stdin.readLineSync() ?? '';
-    final indexes = input
-        .split(',')
-        .map((e) => int.tryParse(e.trim()))
-        .whereType<int>()
-        .toList();
+    stdout.writeln("\nChoose:");
+    stdout.writeln("1. Mark/unmark habit done");
+    stdout.writeln("2. Add new habit");
+    stdout.writeln("3. Exit");
 
-    for (var i in indexes) {
-      tracker.markHabitDone(i);
-    }
-  } else {
-    stdout.writeln("No habits found. Let's add some!");
+    final input = stdin.readLineSync();
 
-    stdout.writeln("How many habits do you want to track?");
-    final count = int.tryParse(stdin.readLineSync() ?? '') ?? 0;
+    switch (input) {
+      case '1':
+        if (tracker.allHabits.isEmpty) {
+          stdout.writeln("⚠️ No habits found. Let's add one now.");
+          await _addHabitFlow(tracker, askDoneAfter: true);
+          break;
+        }
 
-    for (int i = 0; i < count; i++) {
-      stdout.writeln("Enter name for habit ${i + 1}:");
-      final name = stdin.readLineSync() ?? 'Unnamed';
+        stdout.write("Enter habit number to toggle today’s status: ");
+        final index = int.tryParse(stdin.readLineSync() ?? '');
 
-      stdout.writeln("Select difficulty (easy, medium, hard):");
-      final diffInput = stdin.readLineSync() ?? 'easy';
-      final difficulty = _parseDifficulty(diffInput);
+        if (index != null && index >= 0 && index < tracker.allHabits.length) {
+          final habit = tracker.allHabits[index];
 
-      tracker.addHabit(Habit(name, difficulty));
+          if (habit.isDoneToday) {
+            stdout.write("It's already done. Unmark it? (Y / N): ");
+            final confirm = stdin.readLineSync()?.trim().toLowerCase();
+            if (confirm == 'y' || confirm == 'yes') {
+              tracker.unmarkHabitDone(index);
+              await tracker.saveToFile();
+              stdout.writeln("❌ Mark undone for today.");
+            } else {
+              stdout.writeln("↪️ Keeping it as done.");
+            }
+          } else {
+            tracker.markHabitDone(index);
+            await tracker.saveToFile();
+            stdout.writeln("✅ Marked as done.");
+          }
+        } else {
+          stdout.writeln("⚠️ Invalid habit number.");
+        }
+        break;
+
+      case '2':
+        await _addHabitFlow(tracker, askDoneAfter: true);
+        break;
+
+      case '3':
+        await tracker.saveToFile();
+        break outer;
+
+      default:
+        stdout.writeln("⚠️ Invalid option.");
     }
   }
 
-  // Summary
-  stdout.writeln("\n--- Summary ---");
-  for (final habit in tracker.allHabits) {
-    final status = habit.done ? "✅ Done" : "❌ Not Done";
-    stdout.writeln("${habit.name} - ${habit.difficulty.name} - $status");
-  }
+  stdout.writeln("Goodbye.");
+}
 
-  stdout.writeln("\nTotal Completed: ${tracker.totalCompleted}");
-  stdout.writeln("Total XP Earned: ${tracker.totalXP}");
+Future<void> _addHabitFlow(
+  HabitTracker tracker, {
+  bool askDoneAfter = false,
+}) async {
+  stdout.write("Name: ");
+  final name = stdin.readLineSync() ?? '';
+  stdout.write("Difficulty (easy, medium, hard): ");
+  final diffInput = stdin.readLineSync() ?? 'easy';
+  final difficulty = _parseDifficulty(diffInput);
 
-  // Save updated state
+  tracker.addHabit(Habit(name, difficulty));
   await tracker.saveToFile();
+
+  stdout.writeln("😎 Habit added successfully.");
+
+  if (askDoneAfter) {
+    stdout.write("Have you done this habit today? (Y / N): ");
+    final response = stdin.readLineSync()?.trim().toLowerCase();
+    if (response == 'y' || response == 'yes') {
+      final lastIndex = tracker.allHabits.length - 1;
+      tracker.markHabitDone(lastIndex);
+      await tracker.saveToFile();
+      stdout.writeln("✅ Marked as done.");
+    } else {
+      stdout.writeln("❌ Not marked.");
+    }
+  }
 }
 
 Difficulty _parseDifficulty(String input) {
