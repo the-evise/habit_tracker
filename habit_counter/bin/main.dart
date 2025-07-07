@@ -20,62 +20,62 @@ void main() async {
 
   outer:
   while (true) {
+    // 🔔 Show reminders
+    final dueHabits = tracker.checkDueReminders();
+
+    if (dueHabits.isNotEmpty) {
+      stdout.writeln('\n$bold$yellow🔔 Reminders:$reset');
+      for (final h in dueHabits) {
+        stdout.writeln("Don't forget to do $cyan${h.name}$reset today.");
+        if (h.streak > 1) {
+          stdout.writeln(
+            "$cyan🔥 You're on a ${h.streak}-day streak. Keep it going!$reset",
+          );
+        }
+      }
+    }
+
+    // 🧾 Show habit list
     stdout.writeln('\n$bold== YOUR HABITS ==$reset');
     if (tracker.allHabits.isEmpty) {
       stdout.writeln("$yellow⚠️ No habits yet.$reset");
     } else {
       for (int i = 0; i < tracker.allHabits.length; i++) {
         final h = tracker.allHabits[i];
-        stdout.writeln(
-          '$i. $cyan${h.name}$reset (${h.difficulty.name}) $grey-$reset '
-          '🔥 Streak: ${h.streak} day(s) $grey-$reset '
-          '${h.isDoneToday ? '$green✅ Done Today$reset' : '$red❌ Not Done Yet$reset'}',
-        );
+        final reminder = h.reminderTime != null
+            ? "(Reminder: ${h.reminderTime!.hour.toString().padLeft(2, '0')}:${h.reminderTime!.minute.toString().padLeft(2, '0')})"
+            : "";
+        if (h.reminderTime != null) {
+          stdout.writeln(
+            '$i. $cyan${h.name}$reset (${h.difficulty.name}) '
+            '$yellow🔔 $reminder $yellow$grey-$reset '
+            '🔥 Streak: ${h.streak} day(s) $grey-$reset '
+            '${h.isDoneToday ? '$green✅ Done Today$reset' : '$red❌ Not Done Yet$reset'}',
+          );
+        } else {
+          stdout.writeln(
+            '$i. $cyan${h.name}$reset (${h.difficulty.name}) $grey-$reset '
+            '🔥 Streak: ${h.streak} day(s) $grey-$reset '
+            '${h.isDoneToday ? '$green✅ Done Today$reset' : '$red❌ Not Done Yet$reset'}',
+          );
+        }
       }
     }
 
+    // 📋 Menu options
     stdout.writeln("\nChoose:");
     stdout.writeln("1. Mark/unmark habit done");
     stdout.writeln("2. Add new habit");
-    stdout.writeln("3. Show total XP");
-    stdout.writeln("4. Exit");
+    stdout.writeln("3. Edit/delete habits");
+    stdout.writeln("4. Edit Reminders");
+    stdout.writeln("5. Show total XP");
+    stdout.writeln("6. Exit");
 
     final input = stdin.readLineSync();
 
     switch (input) {
       case '1':
-        if (tracker.allHabits.isEmpty) {
-          stdout.writeln(
-            "$yellow⚠️  No habits found. Let's add one now.$reset",
-          );
-          await _addHabitFlow(tracker, askDoneAfter: true);
-          break;
-        }
-
-        stdout.write("Enter habit number to toggle today’s status: ");
-        final index = int.tryParse(stdin.readLineSync() ?? '');
-
-        if (index != null && index >= 0 && index < tracker.allHabits.length) {
-          final habit = tracker.allHabits[index];
-
-          if (habit.isDoneToday) {
-            stdout.write("It's already done. Unmark it? (Y / N): ");
-            final confirm = stdin.readLineSync()?.trim().toLowerCase();
-            if (confirm == 'y' || confirm == 'yes') {
-              tracker.unmarkHabitDone(index);
-              await tracker.saveToFile();
-              stdout.writeln("$red❌ Mark undone for today.$reset");
-            } else {
-              stdout.writeln("$yellow↪️ Keeping it as done.$reset");
-            }
-          } else {
-            tracker.markHabitDone(index);
-            await tracker.saveToFile();
-            stdout.writeln("✅ $green Marked as done. $reset");
-          }
-        } else {
-          stdout.writeln("$yellow⚠️  Invalid habit number.$reset");
-        }
+        await _promptAndToggleHabit(tracker);
         break;
 
       case '2':
@@ -83,15 +83,18 @@ void main() async {
         break;
 
       case '3':
-        stdout.writeln(
-          '$bold🌟 Today XP Earned: $cyan${tracker.todayXp}$reset',
-        );
-        stdout.writeln(
-          '$bold🌟 Total XP Earned: $cyan${tracker.lifetimeXp}$reset',
-        );
+        await _editDeleteFlow(tracker);
         break;
 
       case '4':
+        _reminderFlow(tracker);
+        break;
+
+      case '5':
+        _printXpSummary(tracker);
+        break;
+
+      case '6':
         await tracker.saveToFile();
         break outer;
 
@@ -103,6 +106,8 @@ void main() async {
   stdout.writeln("Goodbye. ^^");
 }
 
+/// --- Subflows and Utilities ---
+
 Future<void> _addHabitFlow(
   HabitTracker tracker, {
   bool askDoneAfter = false,
@@ -113,11 +118,32 @@ Future<void> _addHabitFlow(
   final diffInput = stdin.readLineSync() ?? 'easy';
   final difficulty = _parseDifficulty(diffInput);
 
-  tracker.addHabit(Habit(name, difficulty));
-  await tracker.saveToFile();
+  final newHabit = Habit(name, difficulty);
+  tracker.addHabit(newHabit);
 
+  // 🔔 Ask for reminder time
+  stdout.writeln('Set a daily reminder time for this habit? (Y / N): ');
+  final setReminder = stdin.readLineSync()?.trim().toLowerCase();
+  if (setReminder == 'y' || setReminder == 'yes') {
+    stdout.write('Enter hour (0-23): ');
+    final hour = int.tryParse(stdin.readLineSync() ?? '');
+    stdout.write('Enter minute (0-59): ');
+    final minute = int.tryParse(stdin.readLineSync() ?? '');
+
+    if (hour != null && minute != null) {
+      final lastIndex = tracker.allHabits.length - 1;
+      tracker.setReminderTime(lastIndex, hour, minute);
+      stdout.writeln('$green⏰ Reminder set for $hour:$minute.$reset');
+    } else {
+      stdout.writeln(
+        '$yellow⚠️  Invalid time input. Skipping reminder setup.$reset',
+      );
+    }
+  }
+  await tracker.saveToFile();
   stdout.writeln("😎 Habit added successfully.");
 
+  // ✅ Optionally ask if done today
   if (askDoneAfter) {
     stdout.write("Have you done this habit today? (Y / N): ");
     final response = stdin.readLineSync()?.trim().toLowerCase();
@@ -130,6 +156,186 @@ Future<void> _addHabitFlow(
       stdout.writeln("❌ Not marked.");
     }
   }
+}
+
+Future<void> _toggleHabitDone(HabitTracker tracker, int index) async {
+  final habit = tracker.allHabits[index];
+
+  if (habit.isDoneToday) {
+    tracker.unmarkHabitDone(index);
+    stdout.writeln("$red❌ Mark undone for today.$reset");
+  } else {
+    tracker.markHabitDone(index);
+    stdout.writeln("✅ $green Marked as done.$reset");
+  }
+  try {
+    await tracker.saveToFile();
+  } catch (e) {
+    print("Error on save to file: $e");
+  }
+
+  // 🧠 Feedback: XP updated
+  _printXpSummary(tracker);
+}
+
+Future<void> _promptAndToggleHabit(HabitTracker tracker) async {
+  if (tracker.allHabits.isEmpty) {
+    stdout.writeln("$yellow⚠️ No habits found. Let's add one now.$reset");
+    await _addHabitFlow(tracker, askDoneAfter: true);
+    return;
+  }
+
+  stdout.write("Enter habit number to toggle today’s status: ");
+  final index = int.tryParse(stdin.readLineSync() ?? '');
+
+  if (index != null && index >= 0 && index < tracker.allHabits.length) {
+    final habit = tracker.allHabits[index];
+
+    if (habit.isDoneToday) {
+      stdout.write("It's already done. Unmark it? (Y / N): ");
+      final confirm = stdin.readLineSync()?.trim().toLowerCase();
+      if (confirm == 'y' || confirm == 'yes') {
+        await _toggleHabitDone(tracker, index);
+      } else {
+        stdout.writeln("$yellow↪️ Keeping it as done.$reset");
+      }
+    } else {
+      await _toggleHabitDone(tracker, index);
+    }
+  } else {
+    stdout.writeln("$yellow⚠️  Invalid habit number.$reset");
+  }
+}
+
+Future<void> _reminderFlow(HabitTracker tracker) async {
+  if (tracker.allHabits.isEmpty) {
+    stdout.writeln('$yellow⚠️  No habits to manage.$reset');
+    return;
+  }
+  stdout.write('Enter habit number to manage its reminder: ');
+  final index = int.tryParse(stdin.readLineSync() ?? '');
+
+  if (index == null || index < 0 || index >= tracker.allHabits.length) {
+    stdout.writeln("$yellow⚠️  Invalid habit index.$reset");
+    return;
+  }
+
+  final habit = tracker.allHabits[index];
+  stdout.writeln("Selected: ${habit.name}");
+
+  final current = habit.reminderTime;
+  stdout.writeln("\n${bold}Managing reminder for: $cyan${habit.name}$reset");
+  if (current != null) {
+    stdout.writeln(
+      "⏰ Current reminder set at ${current.hour}:${current.minute.toString().padLeft(2, '0')}",
+    );
+  } else {
+    stdout.writeln("⏰ No reminder currently set.");
+  }
+
+  stdout.writeln("\nWhat do you want to do?");
+  stdout.writeln("1. Set/Update reminder time");
+  stdout.writeln("2. Remove reminder");
+  stdout.writeln("3. Cancel");
+
+  final choice = stdin.readLineSync();
+  switch (choice) {
+    case '1':
+      stdout.write("Enter hour (0-23): ");
+      final hour = int.tryParse(stdin.readLineSync() ?? '');
+      stdout.write("Enter minute (0-59): ");
+      final minute = int.tryParse(stdin.readLineSync() ?? '');
+
+      if (hour != null && minute != null) {
+        tracker.setReminderTime(index, hour, minute);
+        stdout.writeln("$green✅ Reminder updated.$reset");
+        await tracker.saveToFile();
+      } else {
+        stdout.writeln("$yellow⚠️  Invalid time.$reset");
+      }
+      break;
+
+    case '2':
+      tracker.removeReminderTime(index);
+      stdout.writeln("🔕 Reminder removed.");
+      await tracker.saveToFile();
+      break;
+
+    case '3':
+      stdout.writeln("↪️ Cancelled.");
+      break;
+
+    default:
+      stdout.writeln("$yellow⚠️  Invalid option.$reset");
+  }
+}
+
+Future<void> _editDeleteFlow(HabitTracker tracker) async {
+  if (tracker.allHabits.isEmpty) {
+    stdout.writeln("$yellow⚠️  No habits to edit/delete.$reset");
+    return;
+  }
+
+  stdout.write("Enter habit index to edit/delete: ");
+  final index = int.tryParse(stdin.readLineSync() ?? '');
+  if (index == null || index < 0 || index >= tracker.allHabits.length) {
+    stdout.writeln("$yellow⚠️ Invalid index.$reset");
+    return;
+  }
+
+  final habit = tracker.allHabits[index];
+  stdout.writeln("Selected: ${habit.name}");
+
+  stdout.writeln("\nWhat do you want to do?");
+  stdout.writeln("1. Edit habit");
+  stdout.writeln("2. Remove habit");
+  stdout.writeln("3. Cancel");
+
+  final choice = stdin.readLineSync();
+  switch (choice) {
+    case '1':
+      stdout.write("New name (leave empty to keep current): ");
+      final name = stdin.readLineSync();
+      stdout.write("New difficulty (easy/medium/hard): ");
+      final diffInput = stdin.readLineSync() ?? habit.difficulty.name;
+      final difficulty = _parseDifficulty(diffInput);
+
+      final newHabit = Habit(
+        name == null || name.isEmpty ? habit.name : name,
+        difficulty,
+      );
+
+      tracker.editHabit(index, newHabit);
+      await tracker.saveToFile();
+      stdout.writeln("✏️ Habit updated.");
+      break;
+
+    case '2':
+      stdout.write(
+        "$yellow⚠️ Are you sure you want to remove this habit? (Y/N): $reset",
+      );
+      final confirm = stdin.readLineSync()?.trim().toLowerCase();
+      if (confirm == 'y' || confirm == 'yes') {
+        tracker.removeHabit(index);
+        await tracker.saveToFile();
+        stdout.writeln("🗑️ Habit removed.");
+      } else {
+        stdout.writeln("❎ Cancelled.");
+      }
+      break;
+
+    case '3':
+      stdout.writeln("↪️ Cancelled.");
+      break;
+
+    default:
+      stdout.writeln("$yellow⚠️  Invalid option.$reset");
+  }
+}
+
+void _printXpSummary(HabitTracker tracker) {
+  stdout.writeln('$bold🌟 Today XP Earned: $cyan${tracker.todayXp}$reset');
+  stdout.writeln('$bold🌟 Total XP Earned: $cyan${tracker.lifetimeXp}$reset');
 }
 
 Difficulty _parseDifficulty(String input) {

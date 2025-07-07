@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:habit_counter/services/reminder_time.dart';
+
 enum Difficulty { easy, medium, hard }
 
 class Habit {
@@ -7,6 +9,7 @@ class Habit {
   final Difficulty difficulty;
   List<DateTime> completionLog;
   DateTime lastCompleted;
+  ReminderTime? reminderTime;
 
   Habit(
     this.name,
@@ -36,6 +39,9 @@ class Habit {
     return currentStreak;
   }
 
+  // to add validation later and auto logic trigger when updated
+  ReminderTime? get getReminderTime => reminderTime;
+
   bool get isDoneToday {
     final today = _dateOnly(_today());
     return completionLog.any((d) => _isSameDay(_dateOnly(d), today));
@@ -47,21 +53,25 @@ class Habit {
     'difficulty': difficulty.name,
     'lastCompleted': lastCompleted.toIso8601String(),
     'completionLog': completionLog.map((d) => d.toIso8601String()).toList(),
+    'reminderTime': reminderTime?.toJson(),
   };
 
   factory Habit.fromJson(Map<String, dynamic> json) {
     return Habit(
-      json['name'],
-      _parseDifficulty(json['difficulty']),
-      log:
-          (json['completionLog'] as List<dynamic>?)
-              ?.map((d) => DateTime.parse(d).toLocal())
-              .toList() ??
-          [],
-      lastCompleted: json['lastCompleted'] != null
-          ? DateTime.parse(json['lastCompleted']).toLocal()
-          : null,
-    );
+        json['name'],
+        _parseDifficulty(json['difficulty']),
+        log:
+            (json['completionLog'] as List<dynamic>?)
+                ?.map((d) => DateTime.parse(d).toLocal())
+                .toList() ??
+            [],
+        lastCompleted: json['lastCompleted'] != null
+            ? DateTime.parse(json['lastCompleted']).toLocal()
+            : null,
+      )
+      ..reminderTime = json['reminderTime'] != null
+          ? ReminderTime.fromJson(json['reminderTime'])
+          : null;
   }
 
   /// --- Helpers ---

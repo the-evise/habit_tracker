@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:habit_counter/models/habit.dart';
+import 'package:habit_counter/services/reminder_time.dart';
 
 class HabitTracker {
   HabitTracker();
@@ -16,9 +17,25 @@ class HabitTracker {
     Difficulty.hard: 15,
   };
 
-  /// Add a new habit
   void addHabit(Habit habit) {
     habits.add(habit);
+  }
+
+  void removeHabit(int index) {
+    if (index >= 0 && index < habits.length) {
+      habits.removeAt(index);
+    }
+  }
+
+  void editHabit(int index, Habit newHabit) {
+    if (index >= 0 && index < habits.length) {
+      final oldHabit = habits[index];
+      newHabit.lastCompleted = oldHabit.lastCompleted;
+      newHabit.completionLog = oldHabit.completionLog;
+      newHabit.reminderTime = oldHabit.reminderTime;
+
+      habits[index] = newHabit;
+    }
   }
 
   void markHabitDone(int index) {
@@ -129,6 +146,32 @@ class HabitTracker {
         habit.lastCompleted = habit.completionLog.first;
       }
     }
+  }
+
+  // reminder logic
+  void setReminderTime(int index, int hour, int minute) {
+    if (index >= 0 && index < habits.length) {
+      habits[index].reminderTime = ReminderTime(hour, minute);
+    }
+  }
+
+  void removeReminderTime(int index) {
+    if (index >= 0 && index < habits.length) {
+      habits[index].reminderTime = null;
+    }
+  }
+
+  bool shouldRemind(Habit habit) {
+    final now = DateTime.now();
+    final time = habit.reminderTime;
+
+    if (time == null || habit.isDoneToday) return false;
+    return now.hour < time.hour ||
+        (now.hour == time.hour && now.minute <= time.minute);
+  }
+
+  List<Habit> checkDueReminders() {
+    return habits.where(shouldRemind).toList();
   }
 
   /// Helpers (internal)
