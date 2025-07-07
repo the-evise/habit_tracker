@@ -2,24 +2,34 @@ import 'dart:io';
 import 'package:habit_counter/models/habit.dart';
 import 'package:habit_counter/services/tracker.dart';
 
+const reset = '\x1B[0m';
+const bold = '\x1B[1m';
+
+const red = '\x1B[31m';
+const green = '\x1B[32m';
+const yellow = '\x1B[33m';
+const blue = '\x1B[34m';
+const cyan = '\x1B[36m';
+const grey = '\x1B[90m';
+
 void main() async {
   final tracker = HabitTracker();
-  await tracker.loadFromFile();
+  await tracker.loadFromFile(); // load first
 
   stdout.writeln("--- Welcome to Habit Tracker ---");
 
   outer:
   while (true) {
-    stdout.writeln('\n== YOUR HABITS ==');
+    stdout.writeln('\n$bold== YOUR HABITS ==$reset');
     if (tracker.allHabits.isEmpty) {
-      stdout.writeln("⚠️ No habits yet.");
+      stdout.writeln("$yellow⚠️ No habits yet.$reset");
     } else {
       for (int i = 0; i < tracker.allHabits.length; i++) {
         final h = tracker.allHabits[i];
         stdout.writeln(
-          '$i. ${h.name} (${h.difficulty.name}) - '
-          '🔥 Streak: ${h.streak} day(s) - '
-          '${h.isDoneToday ? '✅ Done Today' : '❌ Not Done Yet'}',
+          '$i. $cyan${h.name}$reset (${h.difficulty.name}) $grey-$reset '
+          '🔥 Streak: ${h.streak} day(s) $grey-$reset '
+          '${h.isDoneToday ? '$green✅ Done Today$reset' : '$red❌ Not Done Yet$reset'}',
         );
       }
     }
@@ -27,14 +37,17 @@ void main() async {
     stdout.writeln("\nChoose:");
     stdout.writeln("1. Mark/unmark habit done");
     stdout.writeln("2. Add new habit");
-    stdout.writeln("3. Exit");
+    stdout.writeln("3. Show total XP");
+    stdout.writeln("4. Exit");
 
     final input = stdin.readLineSync();
 
     switch (input) {
       case '1':
         if (tracker.allHabits.isEmpty) {
-          stdout.writeln("⚠️ No habits found. Let's add one now.");
+          stdout.writeln(
+            "$yellow⚠️  No habits found. Let's add one now.$reset",
+          );
           await _addHabitFlow(tracker, askDoneAfter: true);
           break;
         }
@@ -51,17 +64,17 @@ void main() async {
             if (confirm == 'y' || confirm == 'yes') {
               tracker.unmarkHabitDone(index);
               await tracker.saveToFile();
-              stdout.writeln("❌ Mark undone for today.");
+              stdout.writeln("$red❌ Mark undone for today.$reset");
             } else {
-              stdout.writeln("↪️ Keeping it as done.");
+              stdout.writeln("$yellow↪️ Keeping it as done.$reset");
             }
           } else {
             tracker.markHabitDone(index);
             await tracker.saveToFile();
-            stdout.writeln("✅ Marked as done.");
+            stdout.writeln("✅ $green Marked as done. $reset");
           }
         } else {
-          stdout.writeln("⚠️ Invalid habit number.");
+          stdout.writeln("$yellow⚠️  Invalid habit number.$reset");
         }
         break;
 
@@ -70,15 +83,24 @@ void main() async {
         break;
 
       case '3':
+        stdout.writeln(
+          '$bold🌟 Today XP Earned: $cyan${tracker.todayXp}$reset',
+        );
+        stdout.writeln(
+          '$bold🌟 Total XP Earned: $cyan${tracker.lifetimeXp}$reset',
+        );
+        break;
+
+      case '4':
         await tracker.saveToFile();
         break outer;
 
       default:
-        stdout.writeln("⚠️ Invalid option.");
+        stdout.writeln("$yellow⚠️ Invalid option.$reset");
     }
   }
 
-  stdout.writeln("Goodbye.");
+  stdout.writeln("Goodbye. ^^");
 }
 
 Future<void> _addHabitFlow(

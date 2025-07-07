@@ -42,7 +42,6 @@ class Habit {
   }
 
   /// --- JSON Serialization ---
-
   Map<String, dynamic> toJson() => {
     'name': name,
     'difficulty': difficulty.name,

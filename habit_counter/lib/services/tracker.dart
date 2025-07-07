@@ -4,8 +4,11 @@ import 'dart:io';
 import 'package:habit_counter/models/habit.dart';
 
 class HabitTracker {
+  HabitTracker();
   final List<Habit> habits = [];
   final String storageFile = 'habits.json'; // relative path
+
+  int lifetimeXp = 0;
 
   final Map<Difficulty, int> xpTable = {
     Difficulty.easy: 5,
@@ -20,11 +23,16 @@ class HabitTracker {
 
   void markHabitDone(int index) {
     final habit = habits[index];
-    final today = DateTime.now();
+
     if (!habit.isDoneToday) {
-      habit.completionLog.add(DateTime(today.year, today.month, today.day));
+      habit.completionLog.add(_dateOnly(_today()));
+
+      // Ensure log only has last 7 unique days
       habit.completionLog = habit.completionLog.map(_dateOnly).toSet().toList()
         ..sort((a, b) => b.compareTo(a));
+
+      // Update lifetime XP
+      lifetimeXp += xpTable[habit.difficulty] ?? 0;
     }
   }
 
@@ -37,10 +45,13 @@ class HabitTracker {
     // Keep log clean and sorted
     habit.completionLog = habit.completionLog.map(_dateOnly).toSet().toList()
       ..sort((a, b) => b.compareTo(a));
+
+    // Update lifetime XP
+    lifetimeXp -= xpTable[habit.difficulty] ?? 0;
   }
 
   /// Get total XP based on habits completed today
-  int get totalXP => habits
+  int get todayXp => habits
       .where((h) => h.isDoneToday)
       .fold(0, (sum, h) => sum + (xpTable[h.difficulty] ?? 0));
 
@@ -59,9 +70,15 @@ class HabitTracker {
     if (content.trim().isEmpty) return;
 
     try {
-      final List<dynamic> data = jsonDecode(content);
+      final Map<String, dynamic> data = jsonDecode(content);
+
       habits.clear();
-      habits.addAll(data.map((json) => Habit.fromJson(json)));
+      habits.addAll(
+        (data['habits'] as List<dynamic>).map((json) => Habit.fromJson(json)),
+      );
+
+      lifetimeXp = data['lifetimeXp'] ?? 0;
+
       _pruneLogs(); // log cleanup, not daily reset anymore
     } catch (e) {
       stderr.writeln('⚠️ Failed to parse habits.json: $e');
@@ -69,10 +86,27 @@ class HabitTracker {
     }
   }
 
+  Map<String, dynamic> toJson() => {
+    'habits': habits.map((h) => h.toJson()).toList(),
+    'lifetimeXp': lifetimeXp,
+  };
+
+  factory HabitTracker.fromJson(Map<String, dynamic> json) {
+    final tracker = HabitTracker();
+    final loadedHabits = (json['habits'] as List<dynamic>)
+        .map((h) => Habit.fromJson(h))
+        .toList();
+
+    tracker.habits.addAll(loadedHabits);
+    tracker.lifetimeXp = json['lifetimeXp'] ?? 0;
+
+    return tracker;
+  }
+
   /// Persist habits to disk
   Future<void> saveToFile() async {
     final file = File(storageFile);
-    final content = jsonEncode(habits.map((h) => h.toJson()).toList());
+    final content = jsonEncode(toJson());
     await file.writeAsString(content);
   }
 
