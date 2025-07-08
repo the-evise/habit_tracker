@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:habit_counter/models/diary.dart';
 import 'package:habit_counter/models/habit.dart';
 import 'package:habit_counter/services/reminder_time.dart';
 
@@ -8,6 +9,9 @@ class HabitTracker {
   HabitTracker();
   final List<Habit> habits = [];
   final String storageFile = 'habits.json'; // relative path
+
+  final List<DiaryEntry> diary = [];
+  final Map<String, DiaryEntry> diaryEnteries = {};
 
   int lifetimeXp = 0;
 
@@ -96,7 +100,17 @@ class HabitTracker {
 
       lifetimeXp = data['lifetimeXp'] ?? 0;
 
+      diary.clear();
+      if (data.containsKey('diary')) {
+        diary.addAll(
+          (data['diary'] as List<dynamic>).map(
+            (json) => DiaryEntry.fromJson(json),
+          ),
+        );
+      }
+
       _pruneLogs(); // log cleanup, not daily reset anymore
+      _pruneOldDiaries(); // diary monthly cleanup with 1 week grace
     } catch (e) {
       stderr.writeln('⚠️ Failed to parse habits.json: $e');
       habits.clear();
@@ -106,6 +120,7 @@ class HabitTracker {
   Map<String, dynamic> toJson() => {
     'habits': habits.map((h) => h.toJson()).toList(),
     'lifetimeXp': lifetimeXp,
+    'diary': diary.map((d) => d.toJson()).toList(),
   };
 
   factory HabitTracker.fromJson(Map<String, dynamic> json) {
@@ -174,6 +189,35 @@ class HabitTracker {
     return habits.where(shouldRemind).toList();
   }
 
+  void _pruneOldDiaries() {
+    final now = _today();
+    final oneWeekAfterLastMonth = DateTime(
+      now.year,
+      now.month - 1,
+      1,
+    ).add(Duration(days: 37));
+    diary.removeWhere((entry) => entry.date.isBefore(oneWeekAfterLastMonth));
+  }
+
+  addNoteForHabitToday(String habitName, String note) {
+    final today = _today();
+    final existing = diary.firstWhere(
+      (entry) => entry.isSameDay(today),
+      orElse: () => DiaryEntry(date: today),
+    );
+
+    existing.habitNotes[habitName] = note;
+    if (!diary.contains(existing)) diary.add(existing);
+  }
+
+  Map<String, String> getNotesForDate(DateTime date) {
+    final entry = diary.firstWhere(
+      (d) => d.isSameDay(date),
+      orElse: () => DiaryEntry(date: date),
+    );
+    return entry.habitNotes;
+  }
+
   /// Helpers (internal)
   DateTime _today() => _dateOnly(DateTime.now());
 
@@ -181,4 +225,15 @@ class HabitTracker {
 
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+
+  void addHabitNote(String habitName, String note) {
+    final todayKey = _dateOnly(DateTime.now()).toIso8601String();
+
+    final entry = diaryEnteries.putIfAbsent(
+      todayKey,
+      () => DiaryEntry(date: _dateOnly(DateTime.now())),
+    );
+
+    entry.addNote(habitName, note);
+  }
 }

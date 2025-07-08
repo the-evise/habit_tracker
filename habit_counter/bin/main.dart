@@ -68,8 +68,9 @@ void main() async {
     stdout.writeln("2. Add new habit");
     stdout.writeln("3. Edit/delete habits");
     stdout.writeln("4. Edit Reminders");
-    stdout.writeln("5. Show total XP");
-    stdout.writeln("6. Exit");
+    stdout.writeln("5. Diary & Notes");
+    stdout.writeln("6. Show total XP");
+    stdout.writeln("7. Exit");
 
     final input = stdin.readLineSync();
 
@@ -91,10 +92,13 @@ void main() async {
         break;
 
       case '5':
+        await _diaryMenu(tracker);
+
+      case '6':
         _printXpSummary(tracker);
         break;
 
-      case '6':
+      case '7':
         await tracker.saveToFile();
         break outer;
 
@@ -160,16 +164,27 @@ Future<void> _addHabitFlow(
 
 Future<void> _toggleHabitDone(HabitTracker tracker, int index) async {
   final habit = tracker.allHabits[index];
-
+  // update habit status
   if (habit.isDoneToday) {
     tracker.unmarkHabitDone(index);
     stdout.writeln("$red❌ Mark undone for today.$reset");
   } else {
     tracker.markHabitDone(index);
-    stdout.writeln("✅ $green Marked as done.$reset");
+
+    // note prompt
+    stdout.write("📝 Want to add a note for this habit today? (Y / N): ");
+    final noteInput = stdin.readLineSync()?.trim().toLowerCase();
+    if (noteInput == 'y' || noteInput == 'yes') {
+      stdout.write('Enter your note: ');
+      final note = stdin.readLineSync()?.trim() ?? '';
+      tracker.addNoteForHabitToday(habit.name, note);
+    }
   }
   try {
     await tracker.saveToFile();
+    // provide feedback after saving
+    stdout.writeln("✅ $green Marked as done.$reset");
+    stdout.writeln("✅ $green Note added.$reset");
   } catch (e) {
     print("Error on save to file: $e");
   }
@@ -330,6 +345,97 @@ Future<void> _editDeleteFlow(HabitTracker tracker) async {
 
     default:
       stdout.writeln("$yellow⚠️  Invalid option.$reset");
+  }
+}
+
+Future<void> _diaryMenu(HabitTracker tracker) async {
+  while (true) {
+    stdout.writeln('\n$bold💎 Diary Menu$reset');
+    stdout.writeln("1. View today's notes");
+    stdout.writeln("2. View notes by date");
+    stdout.writeln("3. Edit today's note for a habit");
+    stdout.writeln("4. Back to main menu");
+
+    stdout.write("Choose an option: ");
+    final choice = stdin.readLineSync();
+
+    switch (choice) {
+      case '1':
+        _printNotesForDate(tracker, DateTime.now());
+        break;
+
+      case '2':
+        final date = _promptForDate();
+        if (date != null) _printNotesForDate(tracker, date);
+        break;
+
+      case '3':
+        if (tracker.allHabits.isEmpty) {
+          stdout.writeln("$yellow⚠️ No habits found.$reset");
+          break;
+        }
+        stdout.write("Enter habit number to edit note: ");
+        final index = int.tryParse(stdin.readLineSync() ?? '');
+        if (index == null || index < 0 || index >= tracker.allHabits.length) {
+          stdout.writeln("$yellow⚠️ Invalid index.$reset");
+          break;
+        }
+
+        final habit = tracker.allHabits[index];
+        if (!habit.isDoneToday) {
+          stdout.writeln(
+            "$red❌ You can only add/edit notes for habits you've completed today.$reset",
+          );
+          break;
+        }
+        stdout.write("Enter your new note for ${habit.name}: ");
+        final newNote = stdin.readLineSync()?.trim() ?? '';
+        tracker.addNoteForHabitToday(habit.name, newNote);
+
+        try {
+          await tracker.saveToFile();
+          // provide feedback after saving
+          stdout.writeln("$green✅ Note updated.$reset");
+        } catch (e) {
+          print("Error on save to file: $e");
+        }
+
+        break;
+
+      case '4':
+        return;
+
+      default:
+        stdout.writeln("$yellow⚠️ Invalid choice.$reset");
+    }
+  }
+}
+
+DateTime? _promptForDate() {
+  stdout.write("Enter date (YYYY-MM-DD): ");
+  final input = stdin.readLineSync();
+  try {
+    return DateTime.parse(input ?? '');
+  } catch (_) {
+    stdout.writeln("$yellow⚠️ Invalid date format.$reset");
+    return null;
+  }
+}
+
+void _printNotesForDate(HabitTracker tracker, DateTime date) {
+  final notes = tracker.getNotesForDate(date);
+  if (notes.isEmpty) {
+    stdout.writeln(
+      "$grey📭 No notes found for ${date.toIso8601String().split('T').first}.$reset",
+    );
+    return;
+  }
+
+  stdout.writeln(
+    "$bold📅 Notes for ${date.toIso8601String().split('T').first}:$reset\n",
+  );
+  for (final entry in notes.entries) {
+    stdout.writeln("$cyan• ${entry.key}:$reset ${entry.value}");
   }
 }
 

@@ -1,8 +1,17 @@
 class DiaryEntry {
   final DateTime date;
-  final Map<String, String> habitNotes;
+  final Map<String, String> habitNotes; // habit name -> note
 
-  DiaryEntry(this.date, this.habitNotes);
+  DiaryEntry({required this.date, Map<String, String>? notes})
+    : habitNotes = notes ?? {};
+
+  void addNote(String habitName, String note) {
+    habitNotes[habitName] = note;
+  }
+
+  String? getNoteForHabit(String habitName) {
+    return habitNotes[habitName];
+  }
 
   Map<String, dynamic> toJson() => {
     'date': date.toIso8601String(),
@@ -11,8 +20,8 @@ class DiaryEntry {
 
   factory DiaryEntry.fromJson(Map<String, dynamic> json) {
     return DiaryEntry(
-      DateTime.parse(json['date']),
-      Map<String, String>.from(json['habitNotes']),
+      date: DateTime.parse(json['date']),
+      notes: Map<String, String>.from(json['habitNotes'] ?? {}),
     );
   }
 
