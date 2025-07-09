@@ -69,8 +69,9 @@ void main() async {
     stdout.writeln("3. Edit/delete habits");
     stdout.writeln("4. Edit Reminders");
     stdout.writeln("5. Diary & Notes");
-    stdout.writeln("6. Show total XP");
-    stdout.writeln("7. Exit");
+    stdout.writeln("6. Export Weekly Summary to File");
+    stdout.writeln("7. Show total XP");
+    stdout.writeln("8. Exit");
 
     final input = stdin.readLineSync();
 
@@ -95,10 +96,14 @@ void main() async {
         await _diaryMenu(tracker);
 
       case '6':
-        _printXpSummary(tracker);
+        await _exportWeeklySummaryResult(tracker);
         break;
 
       case '7':
+        _printXpSummary(tracker);
+        break;
+
+      case '8':
         await tracker.saveToFile();
         break outer;
 
@@ -442,6 +447,17 @@ void _printNotesForDate(HabitTracker tracker, DateTime date) {
 void _printXpSummary(HabitTracker tracker) {
   stdout.writeln('$bold🌟 Today XP Earned: $cyan${tracker.todayXp}$reset');
   stdout.writeln('$bold🌟 Total XP Earned: $cyan${tracker.lifetimeXp}$reset');
+}
+
+Future<void> _exportWeeklySummaryResult(HabitTracker tracker) async {
+  try {
+    await tracker.exportWeeklySummaryToFile();
+    stdout.writeln("📤 Weekly summary exported successfully.");
+  } catch (e) {
+    stderr.writeln(
+      "There was an error trying to export the weekly summary: $e",
+    );
+  }
 }
 
 Difficulty _parseDifficulty(String input) {

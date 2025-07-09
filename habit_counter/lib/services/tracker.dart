@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:intl/intl.dart';
 
 import 'package:habit_counter/models/diary.dart';
 import 'package:habit_counter/models/habit.dart';
@@ -189,6 +190,7 @@ class HabitTracker {
     return habits.where(shouldRemind).toList();
   }
 
+  /// diary logic
   void _pruneOldDiaries() {
     final now = _today();
     final oneWeekAfterLastMonth = DateTime(
@@ -218,14 +220,6 @@ class HabitTracker {
     return entry.habitNotes;
   }
 
-  /// Helpers (internal)
-  DateTime _today() => _dateOnly(DateTime.now());
-
-  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
-
-  bool _isSameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
-
   void addHabitNote(String habitName, String note) {
     final todayKey = _dateOnly(DateTime.now()).toIso8601String();
 
@@ -235,5 +229,174 @@ class HabitTracker {
     );
 
     entry.addNote(habitName, note);
+  }
+
+  /// weekly summary logic
+  String generateWeeklySummary({bool asMarkdown = true}) {
+    final now = DateTime.now();
+    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+    final endOfWeek = startOfWeek.add(Duration(days: 6));
+    final df = DateFormat('yyyy-MM-dd');
+
+    final buffer = StringBuffer();
+
+    // Header
+    if (asMarkdown) {
+      buffer.writeln(
+        '# 🧭 Weekly Hero\'s Log: ${DateFormat('MMM d').format(startOfWeek)} – ${DateFormat('MMM d, yyyy').format(endOfWeek)}\n',
+      );
+      buffer.writeln('> "Victory is forged one day at a time."\n');
+    } else {
+      buffer.writeln('=== WEEKLY HERO\'S LOG ===');
+      buffer.writeln(
+        'Range: ${df.format(startOfWeek)} to ${df.format(endOfWeek)}\n',
+      );
+    }
+
+    // Top streaks
+    buffer.writeln(
+      asMarkdown ? '## 🔥 Top Streaks This Week' : '\nTop Streaks:',
+    );
+    for (final habit in habits) {
+      final count = _countInRange(habit, startOfWeek, endOfWeek);
+      if (count > 0) {
+        final streakLine =
+            // ignore: prefer_interpolation_to_compose_strings
+            '${_icon(habit)} ${habit.name} — $count day(s)' +
+            (habit.streak >= 7 ? ' 🧱 *Unbroken!*' : '');
+        buffer.writeln(asMarkdown ? '- $streakLine' : streakLine);
+      }
+    }
+
+    buffer.writeln(
+      asMarkdown ? '\n## 📅 Daily Breakdown' : "\nDaily Completion:",
+    );
+
+    // Daily Breakdown, Notes included
+    for (int i = 0; i < 7; i++) {
+      final day = startOfWeek.add(Duration(days: i));
+      final dayHeader = '${DateFormat.EEEE().format(day)}, ${df.format(day)}';
+      final habitsDoneToday = habits.where(
+        (h) => h.completionLog.any((d) => _isSameDay(d, day)),
+      );
+      final notes = getNotesForDate(day);
+
+      buffer.writeln(asMarkdown ? '\n### $dayHeader' : '\n$dayHeader');
+
+      if (habitsDoneToday.isEmpty) {
+        buffer.writeln(
+          asMarkdown ? '*No habits completed.*' : 'No habits completed.',
+        );
+      } else {
+        for (final h in habitsDoneToday) {
+          buffer.writeln(asMarkdown ? '✅ ${h.name}' : '- ${h.name}');
+        }
+      }
+
+      if (notes.isNotEmpty) {
+        buffer.writeln(asMarkdown ? '#### 📝 Notes:' : '\nNotes:');
+        notes.forEach((habitName, note) {
+          buffer.writeln(
+            asMarkdown ? '- **$habitName**: $note' : '- $habitName: $note',
+          );
+        });
+      }
+    }
+
+    // XP Summary
+    final xpSummary = _calculateXpByCount(startOfWeek, endOfWeek);
+    buffer.writeln(asMarkdown ? '\n## 🧠 XP Earned' : '\nXP Breakdown:');
+    for (final entry in xpSummary.entries) {
+      buffer.writeln(
+        asMarkdown
+            ? '- ${entry.key} = **${entry.value} XP**'
+            : '- ${entry.key}: ${entry.value} XP',
+      );
+    }
+
+    final totalXp = xpSummary.values.fold(0, (a, b) => a + b);
+    buffer.writeln(
+      asMarkdown
+          ? '\n**🎯 Total: $totalXp XP**'
+          : '\nTotal XP Earned: $totalXp',
+    );
+
+    return buffer.toString();
+  }
+
+  Future<void> exportWeeklySummaryToFile() async {
+    final today = _today();
+    final start = today.subtract(const Duration(days: 6));
+    final filename =
+        'weekly_summary_${start.year}-${_pad(start.month)}-${_pad(start.day)}_to_${today.year}-${_pad(today.month)}-${_pad(today.day)}.md';
+
+    final content = generateWeeklySummary();
+    final file = File(filename);
+    await file.create(recursive: true);
+    await file.writeAsString(content);
+  }
+
+  /// Helpers (internal)
+  DateTime _today() => _dateOnly(DateTime.now());
+
+  DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  String _weekdayName(int weekday) {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    return days[(weekday - 1) % 7];
+  }
+
+  String _pad(int value) => value.toString().padLeft(2, '0');
+
+  String _formatDate(DateTime date) =>
+      '${date.year}-${_pad(date.month)}-${_pad(date.day)}';
+
+  int _countInRange(Habit habit, DateTime start, DateTime end) {
+    return habit.completionLog
+        .where((d) => !d.isBefore(start) && !d.isAfter(end))
+        .length;
+  }
+
+  String _icon(Habit habit) {
+    switch (habit.difficulty) {
+      case Difficulty.easy:
+        return '🥉';
+      case Difficulty.medium:
+        return '🥈';
+      case Difficulty.hard:
+        return '🥇';
+    }
+  }
+
+  Map<String, int> _calculateXpByCount(DateTime start, DateTime end) {
+    final map = <String, int>{
+      'Easy (5 XP)': 0,
+      'Medium (10 XP)': 0,
+      'Hard (15 XP)': 0,
+    };
+
+    for (final habit in habits) {
+      final count = habit.completionLog
+          .where((d) => !d.isBefore(start) && !d.isAfter(end))
+          .length;
+      final xp = (xpTable[habit.difficulty] ?? 0) * count;
+
+      switch (habit.difficulty) {
+        case Difficulty.easy:
+          map['Easy (5 XP)'] = map['Easy (5 XP)']! + xp;
+          break;
+        case Difficulty.medium:
+          map['Medium (10 XP)'] = map['Medium (10 XP)']! + xp;
+          break;
+        case Difficulty.hard:
+          map['Hard (15 XP)'] = map['Hard (15 XP)']! + xp;
+          break;
+      }
+    }
+
+    return map;
   }
 }
