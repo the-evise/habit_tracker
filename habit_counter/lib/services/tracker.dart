@@ -1,14 +1,19 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:intl/intl.dart';
+import 'package:collection/collection.dart';
 
 import 'package:habit_counter/models/diary.dart';
 import 'package:habit_counter/models/habit.dart';
 import 'package:habit_counter/services/reminder_time.dart';
+import 'package:habit_counter/models/challenge.dart';
 
 class HabitTracker {
   HabitTracker();
   final List<Habit> habits = [];
+  final List<Challenge> challenges = [];
+
   final String storageFile = 'habits.json'; // relative path
 
   final List<DiaryEntry> diary = [];
@@ -55,6 +60,9 @@ class HabitTracker {
 
       // Update lifetime XP
       lifetimeXp += xpTable[habit.difficulty] ?? 0;
+
+      // Challenge completion check
+      _checkChallengesForHabit(habit);
     }
   }
 
@@ -110,6 +118,23 @@ class HabitTracker {
         );
       }
 
+      // Load Challenges
+      challenges.clear();
+      if (data['challenges'] != null) {
+        challenges.addAll(
+          (data['challenges'] as List<dynamic>).map(
+            (c) => Challenge.fromJson(c),
+          ),
+        );
+      }
+      _removeExpiredChallenge();
+
+      // debugging
+      stdout.writeln('Loaded ${challenges.length} challenges.');
+      for (final c in challenges) {
+        stdout.writeln('Challenge: ${c.title} ${c.type}');
+      }
+
       _pruneLogs(); // log cleanup, not daily reset anymore
       _pruneOldDiaries(); // diary monthly cleanup with 1 week grace
     } catch (e) {
@@ -122,6 +147,7 @@ class HabitTracker {
     'habits': habits.map((h) => h.toJson()).toList(),
     'lifetimeXp': lifetimeXp,
     'diary': diary.map((d) => d.toJson()).toList(),
+    'challenges': challenges.map((c) => c.toJson()).toList(),
   };
 
   factory HabitTracker.fromJson(Map<String, dynamic> json) {
@@ -201,7 +227,7 @@ class HabitTracker {
     diary.removeWhere((entry) => entry.date.isBefore(oneWeekAfterLastMonth));
   }
 
-  addNoteForHabitToday(String habitName, String note) {
+  dynamic addNoteForHabitToday(String habitName, String note) {
     final today = _today();
     final existing = diary.firstWhere(
       (entry) => entry.isSameDay(today),
@@ -336,6 +362,155 @@ class HabitTracker {
     await file.writeAsString(content);
   }
 
+  /// Challenges Logic
+  void generateRandomChallenges({int maxActive = 3}) {
+    final activeCount = challenges.where((c) => !c.isCompleted).length;
+    final toGenerate = maxActive - activeCount;
+    if (toGenerate <= 0) return;
+
+    final rand = Random();
+    final available = habits.toList()..shuffle();
+
+    int generated = 0;
+    final usedHabits = <String>{};
+
+    while (generated < toGenerate && available.isNotEmpty) {
+      final typeRoll = rand.nextInt(3); // 0 = streak, 1 = count, 2 = combo
+
+      if (typeRoll == 0 && available.isNotEmpty) {
+        final habit = available.removeLast();
+        if (_hasChallenge(habit.name)) continue;
+
+        _generateStreakChallengeForHabit(habit);
+        usedHabits.add(habit.name);
+        generated++;
+      } else if (typeRoll == 1 && available.isNotEmpty) {
+        final habit = available.removeLast();
+        if (_hasChallenge(habit.name)) continue;
+
+        _generateCountChallengeForHabit(habit);
+        usedHabits.add(habit.name);
+        generated++;
+      } else if (typeRoll == 2 && available.length >= 2) {
+        final h1 = available.removeLast();
+        Habit? h2;
+        for (final h in available) {
+          if (!_hasChallenge(h.name) &&
+              !_hasChallenge(h1.name) &&
+              h.name != h1.name) {
+            h2 = h;
+            break;
+          }
+        }
+        if (h2 == null) continue;
+
+        available.remove(h2);
+
+        _generateComboChallengeForHabits(h1, h2);
+        usedHabits.addAll([h1.name, h2.name]);
+        generated++;
+      }
+    }
+  }
+
+  List<Challenge> checkAndCompleteChallenges() {
+    final List<Challenge> completedChallenges = [];
+    for (final challenge in challenges) {
+      if (challenge.isCompleted) continue;
+
+      final habit = habits.firstWhereOrNull(
+        (h) => h.name == challenge.habitName,
+      );
+
+      if (habit != null && challenge.checkIfMet(habits)) {
+        challenge.isCompleted = true;
+        completedChallenges.add(challenge);
+        lifetimeXp += challenge.rewardXp;
+
+        stdout.writeln(
+          '🏆 Challenge Completed: ${challenge.title} (+${challenge.rewardXp} XP)',
+        );
+      }
+    }
+    return completedChallenges;
+  }
+
+  void generateManualStreakChallenge(
+    Habit habit, {
+    required int streak,
+    required int durationDays,
+  }) {
+    final now = _today();
+    final expires = now.add(Duration(days: durationDays));
+
+    final baseReward = xpTable[habit.difficulty] ?? 5;
+    final reward = baseReward * (streak ~/ 2);
+
+    final challenge = StreakChallenge(
+      id: '${habit.name}_${now.toIso8601String()}',
+      title: '🔥 Keep ${habit.name} for $streak days',
+      habitName: habit.name,
+      assignedOn: now,
+      expiresOn: expires,
+      rewardXp: reward,
+      requiredStreak: streak,
+    );
+
+    challenges.add(challenge);
+  }
+
+  void generateManualCountChallenge(
+    Habit habit, {
+    required int count,
+    required int durationDays,
+  }) {
+    final now = _today();
+    final expires = now.add(Duration(days: durationDays));
+
+    final baseReward = xpTable[habit.difficulty] ?? 5;
+    final reward = baseReward * (count ~/ 2);
+
+    final challenge = CountChallenge(
+      id: '${habit.name}_count_${now.toIso8601String()}',
+      title: '📊 Do ${habit.name} $count times',
+      habitName: habit.name,
+      assignedOn: now,
+      expiresOn: expires,
+      rewardXp: reward,
+      requiredCount: count,
+    );
+
+    challenges.add(challenge);
+  }
+
+  void generateManualComboChallenge(
+    Habit habit1,
+    Habit habit2, {
+    required int comboDays,
+    required int durationDays,
+  }) {
+    final now = _today();
+    final expires = now.add(Duration(days: durationDays));
+
+    final baseReward1 = xpTable[habit1.difficulty] ?? 5;
+    final baseReward2 = xpTable[habit2.difficulty] ?? 5;
+
+    final reward = ((baseReward1 + baseReward2) ~/ 2) * comboDays;
+
+    final challenge = ComboChallenge(
+      id: '${habit1.name}_${habit2.name}_combo_${now.toIso8601String()}',
+      title: '🔗 Do ${habit1.name} + ${habit2.name} $comboDays days in a row',
+      habitName: habit1.name,
+      habitName2: habit2.name,
+      assignedOn: now,
+      expiresOn: expires,
+      rewardXp: reward,
+      requiredComboDays: comboDays,
+    );
+
+    challenges.add(challenge);
+  }
+
   /// Helpers (internal)
   DateTime _today() => _dateOnly(DateTime.now());
 
@@ -398,5 +573,114 @@ class HabitTracker {
     }
 
     return map;
+  }
+
+  void _checkChallengesForHabit(Habit habit) {
+    for (final challenge in challenges) {
+      if (!challenge.isCompleted &&
+          challenge.habitName == habit.name &&
+          challenge.checkIfMet(habits)) {
+        challenge.isCompleted = true;
+        lifetimeXp += challenge.rewardXp;
+
+        stdout.writeln(
+          '\n🎉 Challenge Completed! "${challenge.title}" (+${challenge.rewardXp} XP)',
+        );
+      }
+    }
+  }
+
+  void _removeExpiredChallenge() {
+    final now = _today();
+    challenges.removeWhere((c) {
+      if (c.isCompleted) return false;
+
+      if (c.expiresOn.isBefore(now)) return true;
+
+      // If StreakChallenge: check if it's still possible to complete
+      if (c is StreakChallenge) {
+        final daysLeft = c.expiresOn.difference(now).inDays + 1;
+        return daysLeft < c.requiredStreak;
+      }
+      return false;
+    });
+  }
+
+  void _generateStreakChallengeForHabit(
+    Habit habit, {
+    int minStreak = 3,
+    int maxStreak = 7,
+    int durationDays = 7,
+  }) {
+    final random = Random();
+    final streakTarget = minStreak + random.nextInt(maxStreak - minStreak + 1);
+
+    final now = _today();
+    final expires = now.add(Duration(days: durationDays));
+
+    final baseReward = xpTable[habit.difficulty] ?? 5;
+    final reward = baseReward * (streakTarget ~/ 2);
+
+    final Challenge challenge = StreakChallenge(
+      id: '${habit.name}_${now.toIso8601String()}',
+      title: '🔥 Keep ${habit.name} for $streakTarget days',
+      habitName: habit.name,
+      assignedOn: now,
+      expiresOn: expires,
+      rewardXp: reward,
+      requiredStreak: streakTarget,
+    );
+
+    challenges.add(challenge);
+  }
+
+  bool _hasChallenge(String habitName) {
+    return challenges.any((c) => c.habitName == habitName && !c.isCompleted);
+  }
+
+  void _generateCountChallengeForHabit(Habit habit) {
+    final now = _today();
+    final expires = now.add(Duration(days: 7));
+    final random = Random();
+    final count = 3 + random.nextInt(5); // 3 to 7
+
+    final baseReward = xpTable[habit.difficulty] ?? 5;
+    final reward = baseReward * count;
+
+    challenges.add(
+      CountChallenge(
+        id: '${habit.name}_count_${now.toIso8601String()}',
+        title: '📊 Do ${habit.name} $count times',
+        habitName: habit.name,
+        assignedOn: now,
+        expiresOn: expires,
+        rewardXp: reward,
+        requiredCount: count,
+      ),
+    );
+  }
+
+  void _generateComboChallengeForHabits(Habit h1, Habit h2) {
+    final now = _today();
+    final expires = now.add(Duration(days: 10));
+    final random = Random();
+    final comboDays = 3 + random.nextInt(3); // 3 to 5
+
+    final baseReward =
+        ((xpTable[h1.difficulty] ?? 5) + (xpTable[h2.difficulty] ?? 5)) ~/ 2;
+    final reward = baseReward * comboDays;
+
+    challenges.add(
+      ComboChallenge(
+        id: '${h1.name}_${h2.name}_combo_${now.toIso8601String()}',
+        title: '🔗 Do ${h1.name} + ${h2.name} for $comboDays days in a row',
+        habitName: h1.name,
+        habitName2: h2.name,
+        assignedOn: now,
+        expiresOn: expires,
+        rewardXp: reward,
+        requiredComboDays: comboDays,
+      ),
+    );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:habit_counter/models/habit.dart';
 import 'package:habit_counter/services/tracker.dart';
+import 'package:habit_counter/models/challenge.dart';
 
 const reset = '\x1B[0m';
 const bold = '\x1B[1m';
@@ -15,6 +16,7 @@ const grey = '\x1B[90m';
 void main() async {
   final tracker = HabitTracker();
   await tracker.loadFromFile(); // load first
+  tracker.checkAndCompleteChallenges();
 
   stdout.writeln("--- Welcome to Habit Tracker ---");
 
@@ -32,6 +34,15 @@ void main() async {
             "$cyan🔥 You're on a ${h.streak}-day streak. Keep it going!$reset",
           );
         }
+      }
+    }
+
+    // Show completed challenges
+    final newlyCompleted = tracker.checkAndCompleteChallenges();
+    if (newlyCompleted.isNotEmpty) {
+      stdout.writeln('\n$bold$green🏁 Completed Challenges:$reset');
+      for (final c in newlyCompleted) {
+        stdout.writeln('✔️ ${c.title} (+${c.rewardXp} XP)');
       }
     }
 
@@ -71,7 +82,8 @@ void main() async {
     stdout.writeln("5. Diary & Notes");
     stdout.writeln("6. Export Weekly Summary to File");
     stdout.writeln("7. Show total XP");
-    stdout.writeln("8. Exit");
+    stdout.writeln("8. Challenges");
+    stdout.writeln("9. Exit");
 
     final input = stdin.readLineSync();
 
@@ -104,6 +116,10 @@ void main() async {
         break;
 
       case '8':
+        await _challengeMenu(tracker);
+        break;
+
+      case '9':
         await tracker.saveToFile();
         break outer;
 
@@ -175,6 +191,7 @@ Future<void> _toggleHabitDone(HabitTracker tracker, int index) async {
     stdout.writeln("$red❌ Mark undone for today.$reset");
   } else {
     tracker.markHabitDone(index);
+    tracker.checkAndCompleteChallenges();
 
     // note prompt
     stdout.write("📝 Want to add a note for this habit today? (Y / N): ");
@@ -458,6 +475,191 @@ Future<void> _exportWeeklySummaryResult(HabitTracker tracker) async {
       "There was an error trying to export the weekly summary: $e",
     );
   }
+}
+
+Future<void> _challengeMenu(HabitTracker tracker) async {
+  while (true) {
+    stdout.writeln('\n$bold🧩 Challenges Menu$reset');
+    stdout.writeln('1. View current challenges');
+    stdout.writeln('2. Create random challenges');
+    stdout.writeln('3. Create a manual challenge');
+    stdout.writeln('4. Back to main menu');
+    stdout.write('Choose an option: ');
+
+    final choice = stdin.readLineSync()?.trim();
+
+    switch (choice) {
+      case '1':
+        final active = tracker.challenges.where((c) => !c.isCompleted).toList();
+        if (active.isEmpty) {
+          stdout.writeln('$yellow⚠️ No active challenges.$reset');
+          stdout.write('Generate one now? (Y/N): ');
+          final confirm = stdin.readLineSync()?.trim().toLowerCase();
+          if (confirm == 'y' || confirm == 'yes') {
+            tracker.generateRandomChallenges(maxActive: 3);
+            await tracker.saveToFile();
+            stdout.writeln('$green✅ Challenge(s) created.$reset');
+          }
+        } else {
+          _printChallengeList(active);
+        }
+        break;
+
+      case '2':
+        tracker.generateRandomChallenges(maxActive: 3);
+        await tracker.saveToFile();
+        stdout.writeln('$green✅ Random challenges created (max 3).$reset');
+        break;
+
+      case '3':
+        await _manualChallengeFlow(tracker);
+        break;
+
+      case '4':
+        return;
+
+      default:
+        stdout.writeln('$yellow⚠️ Invalid option.$reset');
+    }
+  }
+}
+
+Future<void> _manualChallengeFlow(HabitTracker tracker) async {
+  final habits = tracker.allHabits;
+
+  if (tracker.challenges.where((c) => !c.isCompleted).length >= 3) {
+    stdout.writeln('$yellow⚠️ Max 3 active challenges allowed.$reset');
+    return;
+  }
+
+  if (habits.isEmpty) {
+    stdout.writeln('$yellow⚠️ No habits found. Add habits first.$reset');
+    return;
+  }
+
+  // Pick challenge type
+  stdout.writeln('\n$bold📂 Select Challenge Type:$reset');
+  stdout.writeln('1. Streak Challenge');
+  stdout.writeln('2. Count Challenge');
+  stdout.writeln('3. Combo Challenge');
+  stdout.write('Enter choice (1–3): ');
+  final type = int.tryParse(stdin.readLineSync() ?? '');
+  if (type == null || type < 1 || type > 3) {
+    stdout.writeln('$yellow⚠️ Invalid challenge type.$reset');
+    return;
+  }
+
+  // Common: Pick first habit
+  final h1 = await _pickHabit(habits);
+  if (h1 == null) return;
+
+  int? duration;
+  int? target;
+  Habit? h2;
+
+  // Additional input based on type
+  switch (type) {
+    case 1: // Streak
+      stdout.write('Enter streak goal (2–14): ');
+      target = int.tryParse(stdin.readLineSync() ?? '');
+      if (target == null || target < 2 || target > 14) {
+        stdout.writeln('$yellow⚠️ Invalid streak.$reset');
+        return;
+      }
+      break;
+
+    case 2: // Count
+      stdout.write('Enter total count goal (3–20): ');
+      target = int.tryParse(stdin.readLineSync() ?? '');
+      if (target == null || target < 3 || target > 20) {
+        stdout.writeln('$yellow⚠️ Invalid count.$reset');
+        return;
+      }
+      break;
+
+    case 3: // Combo
+      stdout.writeln('\nSelect second habit for combo:');
+      final others = habits.where((h) => h.name != h1.name).toList();
+      h2 = await _pickHabit(others);
+      if (h2 == null) return;
+
+      stdout.write('Enter combo streak (2–10): ');
+      target = int.tryParse(stdin.readLineSync() ?? '');
+      if (target == null || target < 2 || target > 10) {
+        stdout.writeln('$yellow⚠️ Invalid combo streak.$reset');
+        return;
+      }
+      break;
+  }
+
+  // Common: Deadline
+  stdout.write('Enter deadline in days (3–21): ');
+  duration = int.tryParse(stdin.readLineSync() ?? '');
+  if (duration == null || duration < 3 || duration > 21) {
+    stdout.writeln('$yellow⚠️ Invalid deadline.$reset');
+    return;
+  }
+
+  // Generate challenge
+  switch (type) {
+    case 1:
+      tracker.generateManualStreakChallenge(
+        h1,
+        streak: target!,
+        durationDays: duration,
+      );
+      break;
+    case 2:
+      tracker.generateManualCountChallenge(
+        h1,
+        count: target!,
+        durationDays: duration,
+      );
+      break;
+    case 3:
+      tracker.generateManualComboChallenge(
+        h1,
+        h2!,
+        comboDays: target!,
+        durationDays: duration,
+      );
+      break;
+  }
+
+  await tracker.saveToFile();
+  stdout.writeln('$green✅ Challenge created successfully.$reset');
+}
+
+void _printChallengeList(List<Challenge> challenges) {
+  stdout.writeln('\n$bold📌 Active Challenges:$reset');
+  for (final c in challenges) {
+    final status = c.isCompleted
+        ? '$green✅ Completed$reset'
+        : '$red⏳ Ongoing$reset';
+    stdout.writeln(
+      '- ${c.title} | Habit: ${c.habitName} | Target: ${c is StreakChallenge ? '${c.requiredStreak}-day streak' : ''} | '
+      'Expires: ${c.expiresOn.toLocal().toIso8601String().split("T").first} | Reward: ${c.rewardXp} XP | $status',
+    );
+  }
+}
+
+Future<Habit?> _pickHabit(List<Habit> habits) async {
+  if (habits.isEmpty) return null;
+
+  for (int i = 0; i < habits.length; i++) {
+    stdout.writeln('$i. ${habits[i].name} (${habits[i].difficulty.name})');
+  }
+
+  stdout.write('Enter habit index: ');
+  final input = stdin.readLineSync();
+  final index = int.tryParse(input ?? '');
+
+  if (index == null || index < 0 || index >= habits.length) {
+    stdout.writeln('$yellow⚠️ Invalid selection.$reset');
+    return null;
+  }
+
+  return habits[index];
 }
 
 Difficulty _parseDifficulty(String input) {
